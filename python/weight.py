@@ -40,43 +40,35 @@ class TFKLD(object):
         self.devM, self.devL = devM, devL
         tstM = countizer.transform(tstT)
         self.tstM, self.tstL = tstM, tstL
-        self.trnM = ssp.lil_matrix(self.trnM)
-        self.devM = ssp.lil_matrix(self.devM)
-        self.tstM = ssp.lil_matrix(self.tstM)
+        self.trnM = ssp.csc_matrix(self.trnM)
+        self.devM = ssp.csc_matrix(self.devM)
+        self.tstM = ssp.csc_matrix(self.tstM)
 
 
     def weighting(self):
         print 'Create data matrix ...'
         self.createdata()
         print 'Counting features ...'
-        M = self.trnM.todense()
+        M = self.trnM
         print 'type(M) = {}'.format(type(M))
-        L = self.trnL
+        L = numpy.array(self.trnL)
         nRow, nDim = M.shape
         print 'nRow, nDim = {}, {}'.format(nRow, nDim)
         # (0, F), (0, T), (1, F), (1, T)
         count = numpy.ones((4, nDim))
-        for n in range(0, nRow, 2):
-            if n % 1000  == 0:
-                print 'Process {} rows'.format(n)
-            for d in range(nDim):
-                label = L[n // 2]
-                if ((M[n,d] > 0) and (M[n+1,d] == 0)) or ((M[n,d] == 0) and (M[n+1,d] > 0)):
-                    # Non-shared
-                    if label == 0:
-                        # (0, F)
-                        count[0,d] += 1.0
-                    elif label == 1:
-                        # (1, F)
-                        count[2,d] += 1.0
-                elif (M[n,d] > 0) and (M[n+1,d] > 0):
-                    # Shared
-                    if label == 0:
-                        # (0, T)
-                        count[1,d] += 1.0
-                    elif label == 1:
-                        # (1, T)
-                        count[3,d] += 1.0
+        X = ssp.hstack((M[[i for i in xrange(nRow) if i % 2 == 0], :],
+                        M[[i for i in xrange(nRow) if i % 2 == 1], :]))
+        label_0, label_1 = (L == 0), (L == 1)
+        for d in range(nDim):
+            w1_d = (X[:, d] > 0).T.toarray()[0]
+            w2_d = (X[:, d + nDim] > 0).T.toarray()[0]
+            shared = w1_d & w2_d
+            non_shared = w1_d ^ w2_d
+            count[0,d] = 1 + sum(non_shared & label_0)
+            count[2,d] = 1 + sum(non_shared & label_1)
+            count[1,d] = 1 + sum(shared & label_0)
+            count[3,d] = 1 + sum(shared & label_1)
+
         # Compute KLD
         print 'Compute KLD weights ...'
         weight = self.computeKLD(count)
@@ -101,20 +93,9 @@ class TFKLD(object):
     def __weighting(self):
         weight = ssp.lil_matrix(self.weight)
         print 'Applying weighting to training examples'
-        for n in range(self.trnM.shape[0]):
-            if n % 1000  == 0:
-                print 'Process {} rows'.format(n)
-            self.trnM[n, :] = self.trnM[n, :].multiply(weight)
-        print 'Applying weighting to dev examples'
-        for n in range(self.devM.shape[0]):
-            if n % 1000  == 0:
-                print 'Process {} rows'.format(n)
-            self.devM[n, :] = self.devM[n, :].multiply(weight)
-        print 'Applying weighting to test examples'
-        for n in range(self.tstM.shape[0]):
-            if n % 1000  == 0:
-                print 'Process {} rows'.format(n)
-            self.tstM[n, :] = self.tstM[n, :].multiply(weight)
+        self.trnM = self.trnM.multiply(weight)
+        self.devM = self.devM.multiply(weight)
+        self.tstM = self.tstM.multiply(weight)
 
 
     def save(self, fname):
@@ -132,10 +113,11 @@ def main():
     ftest = "../data/test.data"
     tfkld = TFKLD(ftrain, fdev, ftest)
     tfkld.weighting()
-    tfkld.createdata()
+    # tfkld.createdata()
     tfkld.save("original-data.pickle.gz")
+
 
 if __name__ == "__main__":
     main()
-    
-    
+
+
